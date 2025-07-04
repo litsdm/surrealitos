@@ -249,3 +249,12 @@ where
         deserializer.deserialize_any(RelationVisitor(std::marker::PhantomData))
     }
 }
+
+pub fn extract_id(id: &str, sub_str: &str) -> String {
+    let start = format!("{sub_str}:");
+    let len = sub_str.len() + 1;
+    match id.starts_with(&start) {
+        true => id[len..].replace(['⟨', '⟩', '\\'], ""),
+        false => id.to_string(),
+    }
+}
