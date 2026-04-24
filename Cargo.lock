@@ -2907,7 +2907,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e46a2036019fdb888131db7a4c847a1063a7493f971ed94ea82c67eada63ca54"
 dependencies = [
  "serde",
- "serde_derive 1.0.228",
+ "serde_derive 1.0.228 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -3132,10 +3132,11 @@ checksum = "cd0b0ec5f1c1ca621c432a25813d8d60c88abe6d3e08a3eb9cf37d97a0fe3d73"
 
 [[package]]
 name = "serde"
-version = "1.0.219"
-source = "git+https://github.com/frederik-uni/serde#cd7a7f70ff351441f9c356cc2929bb381d538a8c"
+version = "1.0.228"
+source = "git+https://github.com/litsdm/serde#c6d9248d97b4ecc49c3e795d91b69013e3066cd7"
 dependencies = [
- "serde_derive 1.0.219",
+ "serde_core",
+ "serde_derive 1.0.228 (git+https://github.com/litsdm/serde)",
 ]
 
 [[package]]
@@ -3147,9 +3148,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_core"
+version = "1.0.228"
+source = "git+https://github.com/litsdm/serde#c6d9248d97b4ecc49c3e795d91b69013e3066cd7"
+dependencies = [
+ "serde_derive 1.0.228 (git+https://github.com/litsdm/serde)",
+]
+
+[[package]]
 name = "serde_derive"
-version = "1.0.219"
-source = "git+https://github.com/frederik-uni/serde#cd7a7f70ff351441f9c356cc2929bb381d538a8c"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3159,8 +3169,7 @@ dependencies = [
 [[package]]
 name = "serde_derive"
 version = "1.0.228"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
+source = "git+https://github.com/litsdm/serde#c6d9248d97b4ecc49c3e795d91b69013e3066cd7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3206,7 +3215,7 @@ dependencies = [
  "schemars 0.9.0",
  "schemars 1.0.3",
  "serde",
- "serde_derive 1.0.228",
+ "serde_derive 1.0.228 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json",
  "serde_with_macros",
  "time",
