@@ -1,10 +1,45 @@
 use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use surrealdb::{RecordId, sql::Id};
+use surrealdb::types::{
+    ConversionError, Error, Kind, RecordId, RecordIdKey, SurrealValue, ToSql, Value,
+};
 
 #[derive(Debug, Clone)]
 pub struct SurrealId(pub RecordId);
+
+// Implemented manually rather than derived so that `is_value` only matches a
+// `RecordId` (or an id-shaped string). The derived impl would delegate to
+// `RecordId::is_value`, which also returns `true` for any object containing an
+// `id` field, causing fetched full records to be mis-decoded as bare ids in
+// `Relation<T>`.
+impl SurrealValue for SurrealId {
+    fn kind_of() -> Kind {
+        RecordId::kind_of()
+    }
+
+    fn is_value(value: &Value) -> bool {
+        match value {
+            Value::RecordId(_) => true,
+            Value::String(s) => RecordId::parse_simple(s).is_ok(),
+            _ => false,
+        }
+    }
+
+    fn into_value(self) -> Value {
+        Value::RecordId(self.0)
+    }
+
+    fn from_value(value: Value) -> Result<Self, Error> {
+        match value {
+            Value::RecordId(record_id) => Ok(SurrealId(record_id)),
+            Value::String(s) => RecordId::parse_simple(&s)
+                .map(SurrealId)
+                .map_err(|err| Error::internal(err.to_string())),
+            other => Err(ConversionError::from_value(Self::kind_of(), &other).into()),
+        }
+    }
+}
 
 impl<'de> Deserialize<'de> for SurrealId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -30,7 +65,7 @@ impl<'de> Deserialize<'de> for SurrealId {
                         "Invalid format for SurrealId: expected 'table:id'",
                     ));
                 }
-                let id = RecordId::from_table_key(parts[0], parts[1]);
+                let id = RecordId::new(parts[0], parts[1]);
                 Ok(SurrealId(id))
             }
 
@@ -58,7 +93,7 @@ impl Serialize for SurrealId {
 
 impl fmt::Display for SurrealId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.0.to_sql())
     }
 }
 
@@ -78,7 +113,7 @@ impl std::str::FromStr for SurrealId {
                 input: s.to_string(),
             });
         }
-        let id = RecordId::from_table_key(parts[0], parts[1]);
+        let id = RecordId::new(parts[0], parts[1]);
         Ok(SurrealId(id))
     }
 }
@@ -168,22 +203,23 @@ enum ValueOrThing {
 impl ValueOrThing {
     fn into_json_value(self) -> serde_json::Value {
         match self {
-            ValueOrThing::Thing(thing) => serde_json::Value::String(thing.to_string()),
+            ValueOrThing::Thing(thing) => serde_json::Value::String(thing.to_sql()),
             ValueOrThing::Value(v) => v,
         }
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, SurrealValue)]
 #[serde(untagged)]
-pub enum Relation<T> {
+#[surreal(crate = "surrealdb::types", untagged)]
+pub enum Relation<T: SurrealValue> {
     Id(SurrealId),
     Full(T),
 }
 
 impl<'de, T> Deserialize<'de> for Relation<T>
 where
-    T: Deserialize<'de>,
+    T: Deserialize<'de> + SurrealValue,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -193,7 +229,7 @@ where
 
         impl<'de, T> serde::de::Visitor<'de> for RelationVisitor<T>
         where
-            T: Deserialize<'de>,
+            T: Deserialize<'de> + SurrealValue,
         {
             type Value = Relation<T>;
 
@@ -208,10 +244,11 @@ where
                 Ok(Relation::Id(SurrealId::from(value)))
             }
 
-            // There is an underlying issue with the crate serde-content on how they try to process enums
-            // this issue affects surrealdb_core::sql::Id which in turn messes with this deserialization.
-            // We had to patch serde and serde-content using @frederik-uni's patch, and implement this
-            // custom deserializer to be able to deserialize Relations with nested SurrealIds or Relations
+            // SurrealDB presents a record id to serde visitors as a map. In v3 the field
+            // names are `table`/`key` (previously `tb`/`id`), and since the underlying
+            // Object is a BTreeMap, `key` is visited before `table`. We handle both orders
+            // and fall back to deserializing a full object otherwise. The patched serde
+            // (visit_enum support) is still required for nested untagged deserialization.
             // refs: [https://github.com/surrealdb/surrealdb/issues/4921#issuecomment-2539445295, https://github.com/rushmorem/serde-content/issues/27]
             fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
             where
@@ -220,13 +257,20 @@ where
                 let key_string = map.next_key::<String>()?.unwrap_or("".to_string());
                 let key = key_string.as_str();
 
-                if key == "tb" || key == "id" {
-                    let tb_value = map.next_value::<String>()?;
+                if key == "table" || key == "key" {
+                    let (table, record_key) = if key == "table" {
+                        let table = map.next_value::<String>()?;
+                        let _key_key = map.next_key::<String>()?;
+                        let record_key = map.next_value::<RecordIdKey>()?;
+                        (table, record_key)
+                    } else {
+                        let record_key = map.next_value::<RecordIdKey>()?;
+                        let _table_key = map.next_key::<String>()?;
+                        let table = map.next_value::<String>()?;
+                        (table, record_key)
+                    };
 
-                    let _id_key = map.next_key::<&str>()?;
-                    let id_value = map.next_value::<Id>()?;
-
-                    let id = RecordId::from_table_key(tb_value, id_value.to_raw());
+                    let id = RecordId::new(table, record_key);
                     Ok(Relation::Id(SurrealId(id)))
                 } else {
                     let first_value = map.next_value::<serde_json::Value>()?;
